@@ -28,7 +28,7 @@ export default async (req) => {
               temperature: 0,
               maxOutputTokens: 2048,
               responseMimeType: 'application/json',
-              thinkingConfig: { thinkingBudget: 256 },
+              thinkingConfig: { thinkingBudget: 128 },
             },
           }),
         }
