@@ -10,8 +10,10 @@ export default async (req) => {
 
   try {
     const body = await req.json();
-    const text = body.messages.map((m) => m.content).join('\n\n') + '\n\nIMPORTANT: Output ONLY raw valid JSON without markdown or extra text.';
-    const models = ['gemini-2.5-flash', 'gemini-3.1-flash-lite-preview'];
+    const text =
+      body.messages.map((m) => m.content).join('\n\n') +
+      '\n\nIMPORTANT: Solve each step carefully. Output ONLY raw valid JSON without markdown or extra text.';
+    const models = ['gemini-3.1-flash-lite-preview', 'gemini-2.5-flash'];
     const errs = [];
 
     for (const model of models) {
@@ -24,16 +26,21 @@ export default async (req) => {
             contents: [{ role: 'user', parts: [{ text }] }],
             generationConfig: {
               temperature: 0,
-              maxOutputTokens: 1024,
+              maxOutputTokens: 2048,
               responseMimeType: 'application/json',
-              thinkingConfig: { thinkingBudget: 0 },
+              thinkingConfig: { thinkingBudget: 256 },
             },
           }),
         }
       );
       const data = await r.json();
       if (!data.error) {
-        const reply = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
+        const parts = data.candidates?.[0]?.content?.parts || [];
+        const reply =
+          parts
+            .filter((p) => !p.thought)
+            .map((p) => p.text)
+            .join('') || '';
         return new Response(
           JSON.stringify({ choices: [{ message: { content: reply } }] }),
           { headers: { ...cors, 'Content-Type': 'application/json' } }
@@ -42,10 +49,13 @@ export default async (req) => {
       errs.push(`${model}: ${data.error.message}`);
     }
 
-    return new Response(JSON.stringify({ error: { message: errs.join(' | ') } }), {
-      status: 400,
-      headers: { ...cors, 'Content-Type': 'application/json' },
-    });
+    return new Response(
+      JSON.stringify({ error: { message: errs.join(' | ') } }),
+      {
+        status: 400,
+        headers: { ...cors, 'Content-Type': 'application/json' },
+      }
+    );
   } catch (e) {
     return new Response(JSON.stringify({ error: { message: e.message } }), {
       status: 400,
