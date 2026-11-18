@@ -11,7 +11,7 @@ export default async (req) => {
   try {
     const body = await req.json();
     const text = body.messages.map((m) => m.content).join('\n\n') + '\n\nIMPORTANT: Output ONLY raw valid JSON without markdown or extra text.';
-    const models = ['gemini-2.5-flash-lite', 'gemini-2.5-flash'];
+    const models = ['gemini-2.5-flash', 'gemini-3.1-flash-lite-preview'];
     const errs = [];
 
     for (const model of models) {
@@ -26,7 +26,7 @@ export default async (req) => {
               temperature: 0,
               maxOutputTokens: 1024,
               responseMimeType: 'application/json',
-              thinkingConfig: { thinkingBudget: 256 },
+              thinkingConfig: { thinkingBudget: 0 },
             },
           }),
         }
