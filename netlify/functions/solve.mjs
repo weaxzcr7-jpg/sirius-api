@@ -11,22 +11,18 @@ export default async (req) => {
   try {
     const body = await req.json();
     const text = body.messages.map((m) => m.content).join('\n\n') + '\n\nIMPORTANT: Output ONLY raw valid JSON without markdown or extra text.';
-    const models = ['gemini-2.5-flash-lite', 'gemini-2.5-flash', 'gemma-3-27b-it'];
+    const models = ['gemini-2.5-flash', 'gemini-2.5-flash-lite', 'gemini-2.0-flash', 'gemini-2.0-flash-lite'];
     let lastError = 'Error';
 
     for (const model of models) {
-      const isGemma = model.startsWith('gemma');
       const payload = JSON.stringify({
         contents: [{ role: 'user', parts: [{ text }] }],
-        generationConfig: {
-          temperature: 0,
-          maxOutputTokens: 1024,
-          ...(isGemma ? {} : { responseMimeType: 'application/json', thinkingConfig: { thinkingBudget: 0 } }),
-        },
+        generationConfig: { temperature: 0, maxOutputTokens: 1024 },
       });
 
       const urls = [
         `https://aiplatform.googleapis.com/v1/publishers/google/models/${model}:generateContent?key=${GEMINI_KEY}`,
+        `https://generativelanguage.googleapis.com/v1/models/${model}:generateContent?key=${GEMINI_KEY}`,
         `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${GEMINI_KEY}`,
       ];
 
