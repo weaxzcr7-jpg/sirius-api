@@ -11,22 +11,27 @@ export default async (req) => {
   try {
     const body = await req.json();
     const text = body.messages.map((m) => m.content).join('\n\n') + '\n\nIMPORTANT: Output ONLY raw valid JSON without markdown or extra text.';
-    const models = ['gemini-2.5-flash', 'gemini-2.5-flash-lite', 'gemini-2.0-flash', 'gemini-2.0-flash-lite'];
-    let lastError = 'Error';
+    const models = ['gemini-2.5-flash-lite', 'gemini-2.5-flash', 'gemini-3.1-flash-lite-preview'];
+    const errs = [];
 
     for (const model of models) {
       const payload = JSON.stringify({
         contents: [{ role: 'user', parts: [{ text }] }],
-        generationConfig: { temperature: 0, maxOutputTokens: 1024 },
+        generationConfig: {
+          temperature: 0,
+          maxOutputTokens: 1024,
+          responseMimeType: 'application/json',
+          thinkingConfig: { thinkingBudget: 0 },
+        },
       });
 
       const urls = [
         `https://aiplatform.googleapis.com/v1/publishers/google/models/${model}:generateContent?key=${GEMINI_KEY}`,
-        `https://generativelanguage.googleapis.com/v1/models/${model}:generateContent?key=${GEMINI_KEY}`,
         `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${GEMINI_KEY}`,
       ];
 
       for (const url of urls) {
+        const host = url.includes('aiplatform') ? 'vertex' : 'aistudio';
         const r = await fetch(url, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -40,11 +45,11 @@ export default async (req) => {
             { headers: { ...cors, 'Content-Type': 'application/json' } }
           );
         }
-        lastError = `[${model}] ${data.error.message}`;
+        errs.push(`${model}(${host}): ${data.error.message}`);
       }
     }
 
-    return new Response(JSON.stringify({ error: { message: lastError } }), {
+    return new Response(JSON.stringify({ error: { message: errs.join(' | ') } }), {
       status: 400,
       headers: { ...cors, 'Content-Type': 'application/json' },
     });
