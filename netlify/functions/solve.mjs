@@ -29,7 +29,7 @@ export default async (req) => {
               ...(isGemma ? {} : { responseMimeType: 'application/json', thinkingConfig: { thinkingBudget: 0 } }),
             },
           }),
-        }
+        }. 
       );
 
       const data = await r.json();
