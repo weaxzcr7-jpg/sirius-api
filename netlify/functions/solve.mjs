@@ -49,16 +49,19 @@ export default async (req) => {
     const started = Date.now();
     const timeLeft = () => Math.max(1500, 9200 - (Date.now() - started));
 
-    // Все ключи Gemini (и AQ., и AIza...) идут на стандартный Gemini API
     const models = [
-      'gemini-3.1-flash-lite-preview',
-      'gemini-2.5-flash',
       'gemini-2.5-flash-lite',
+      'gemini-2.5-flash',
       'gemini-3-flash-preview',
+      'gemini-3.1-flash-lite-preview',
     ];
 
     const now = Date.now();
     for (const model of models) {
+      if (Date.now() - started > 8000) break;
+      const mid = `model:${model}`;
+      if ((cooldown.get(mid) || 0) > now) continue;
+
       for (const key of geminiKeys) {
         if (Date.now() - started > 8000) break;
         const kid = `key:${key.slice(-8)}`;
@@ -71,7 +74,7 @@ export default async (req) => {
             {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
-              signal: AbortSignal.timeout(Math.min(4500, timeLeft())),
+              signal: AbortSignal.timeout(Math.min(3500, timeLeft())),
               body: JSON.stringify({
                 contents: [{ role: 'user', parts: [{ text: prompt }] }],
                 generationConfig: {
@@ -93,18 +96,24 @@ export default async (req) => {
           if (r.status === 429 || /quota|limit|exceeded/i.test(msg)) {
             cooldown.set(cid, Date.now() + 10 * 60 * 1000);
           } else if (r.status === 404 || /not found/i.test(msg)) {
-            cooldown.set(cid, Date.now() + 30 * 60 * 1000);
+            cooldown.set(mid, Date.now() + 30 * 60 * 1000);
+            errs.push(`${model}[..${key.slice(-4)}]: ${msg.slice(0, 90)}`);
+            break;
+          } else if (r.status === 503 || /high demand|overloaded|unavailable/i.test(msg)) {
+            cooldown.set(mid, Date.now() + 2 * 60 * 1000);
+            errs.push(`${model}[..${key.slice(-4)}]: ${msg.slice(0, 90)}`);
+            break;
           } else if (r.status === 401 || r.status === 403 || /permission denied|not valid/i.test(msg)) {
             cooldown.set(kid, Date.now() + 30 * 60 * 1000);
           }
-          errs.push(`${model}[..${key.slice(-4)}]: ${msg.slice(0, 110)}`);
+          errs.push(`${model}[..${key.slice(-4)}]: ${msg.slice(0, 90)}`);
         } catch (e) {
           errs.push(`${model}[..${key.slice(-4)}]: ${e.message}`);
+          break;
         }
       }
     }
 
-    // Резерв на Mistral (если заданы MISTRAL_KEY*)
     for (const key of mistralKeys) {
       if (Date.now() - started > 8500) break;
       const cid = `mistral:${key.slice(-8)}`;
@@ -131,7 +140,6 @@ export default async (req) => {
       }
     }
 
-    // Резерв на OpenRouter (если заданы OPENROUTER_KEY*)
     for (const key of orKeys) {
       if (Date.now() - started > 8500) break;
       const cid = `or:${key.slice(-8)}`;
