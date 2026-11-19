@@ -47,22 +47,23 @@ export default async (req) => {
 
     const errs = [];
     const started = Date.now();
-    const timeLeft = () => Math.max(1500, 9200 - (Date.now() - started));
+    const BUDGET = 7500;
+    const left = () => BUDGET - (Date.now() - started);
     const now = Date.now();
 
-    // 1. Основной провайдер: OpenRouter
+    // 1. OpenRouter (основной быстрый провайдер)
     const orModels = ['openrouter/free', 'google/gemma-3-27b-it:free'];
-    for (const key of orKeys) {
-      if (Date.now() - started > 8200) break;
-      const cid = `or:${key.slice(-8)}`;
-      if ((cooldown.get(cid) || 0) > now) continue;
-      for (const orModel of orModels) {
-        if (Date.now() - started > 8200) break;
+    for (const orModel of orModels) {
+      if (left() < 900) break;
+      for (const key of orKeys) {
+        if (left() < 900) break;
+        const cid = `or:${orModel}:${key.slice(-8)}`;
+        if ((cooldown.get(cid) || 0) > now) continue;
         try {
           const r = await fetch('https://openrouter.ai/api/v1/chat/completions', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${key}` },
-            signal: AbortSignal.timeout(Math.min(4500, timeLeft())),
+            signal: AbortSignal.timeout(Math.min(4000, left())),
             body: JSON.stringify({
               model: orModel,
               temperature: 0,
@@ -73,23 +74,24 @@ export default async (req) => {
           const reply = data.choices?.[0]?.message?.content?.trim();
           if (reply) return replyJson({ choices: [{ message: { content: reply } }] });
           if (r.status === 429) cooldown.set(cid, Date.now() + 5 * 60 * 1000);
+          else if (r.status === 404) cooldown.set(cid, Date.now() + 30 * 60 * 1000);
           errs.push(`or/${orModel}[..${key.slice(-4)}]: ${data.error?.message || `HTTP ${r.status}`}`);
         } catch (e) {
-          errs.push(`or/${orModel}[..${key.slice(-4)}]: ${e.message}`);
+          errs.push(`or/${orModel}[..${key.slice(-4)}]: ${e.name === 'TimeoutError' ? 'timeout' : e.message}`);
         }
       }
     }
 
-    // 2. Запасной провайдер: Mistral (если заданы MISTRAL_KEY*)
+    // 2. Mistral (если заданы ключи)
     for (const key of mistralKeys) {
-      if (Date.now() - started > 8500) break;
+      if (left() < 900) break;
       const cid = `mistral:${key.slice(-8)}`;
       if ((cooldown.get(cid) || 0) > now) continue;
       try {
         const r = await fetch('https://api.mistral.ai/v1/chat/completions', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${key}` },
-          signal: AbortSignal.timeout(timeLeft()),
+          signal: AbortSignal.timeout(Math.min(3200, left())),
           body: JSON.stringify({
             model: 'mistral-small-latest',
             temperature: 0,
@@ -103,30 +105,28 @@ export default async (req) => {
         if (r.status === 429) cooldown.set(cid, Date.now() + 5 * 60 * 1000);
         errs.push(`mistral[..${key.slice(-4)}]: ${data.message || data.error?.message || 'empty'}`);
       } catch (e) {
-        errs.push(`mistral[..${key.slice(-4)}]: ${e.message}`);
+        errs.push(`mistral[..${key.slice(-4)}]: ${e.name === 'TimeoutError' ? 'timeout' : e.message}`);
       }
     }
 
-    // 3. Запасной провайдер: Gemini
-    const models = ['gemini-3-flash-preview', 'gemini-2.5-flash', 'gemini-2.5-flash-lite'];
+    // 3. Gemini (запасной провайдер, без медленных и недоступных моделей)
+    const models = ['gemini-3-flash-preview', 'gemini-2.5-flash'];
     for (const model of models) {
-      if (Date.now() - started > 8800) break;
+      if (left() < 900) break;
       const mid = `model:${model}`;
       if ((cooldown.get(mid) || 0) > now) continue;
-
       for (const key of geminiKeys) {
-        if (Date.now() - started > 8800) break;
+        if (left() < 900) break;
         const kid = `key:${key.slice(-8)}`;
         const cid = `${model}:${key.slice(-8)}`;
         if ((cooldown.get(kid) || 0) > now || (cooldown.get(cid) || 0) > now) continue;
-
         try {
           const r = await fetch(
             `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${key}`,
             {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
-              signal: AbortSignal.timeout(Math.min(3000, timeLeft())),
+              signal: AbortSignal.timeout(Math.min(2600, left())),
               body: JSON.stringify({
                 contents: [{ role: 'user', parts: [{ text: prompt }] }],
                 generationConfig: {
@@ -145,26 +145,17 @@ export default async (req) => {
             if (reply) return replyJson({ choices: [{ message: { content: reply } }] });
           }
           const msg = data.error?.message || `HTTP ${r.status}`;
-          if (r.status === 429 || /quota|limit|exceeded/i.test(msg)) {
-            cooldown.set(cid, Date.now() + 10 * 60 * 1000);
-          } else if (r.status === 404 || /no longer available|not found/i.test(msg)) {
-            cooldown.set(mid, Date.now() + 60 * 60 * 1000);
-            errs.push(`${model}[..${key.slice(-4)}]: ${msg.slice(0, 90)}`);
-            break;
-          } else if (r.status === 503 || /high demand|overloaded|unavailable/i.test(msg)) {
-            cooldown.set(mid, Date.now() + 2 * 60 * 1000);
-            errs.push(`${model}[..${key.slice(-4)}]: ${msg.slice(0, 90)}`);
-            break;
-          } else if (r.status === 401 || r.status === 403 || /permission denied|not valid/i.test(msg)) {
-            cooldown.set(kid, Date.now() + 30 * 60 * 1000);
-          }
-          errs.push(`${model}[..${key.slice(-4)}]: ${msg.slice(0, 90)}`);
+          if (r.status === 429 || /quota|limit|exceeded/i.test(msg)) cooldown.set(cid, Date.now() + 10 * 60 * 1000);
+          else if (r.status === 404 || /no longer available|not found/i.test(msg)) { cooldown.set(mid, Date.now() + 60 * 60 * 1000); break; }
+          else if (r.status === 503 || /high demand|overloaded|unavailable/i.test(msg)) { cooldown.set(mid, Date.now() + 2 * 60 * 1000); break; }
+          else if (r.status === 401 || r.status === 403 || /permission denied|not valid/i.test(msg)) cooldown.set(kid, Date.now() + 30 * 60 * 1000);
+          errs.push(`${model}[..${key.slice(-4)}]: ${msg.slice(0, 80)}`);
         } catch (e) {
-          errs.push(`${model}[..${key.slice(-4)}]: ${e.message}`);
+          errs.push(`${model}[..${key.slice(-4)}]: ${e.name === 'TimeoutError' ? 'timeout' : e.message}`);
           break;
         }
       }
-    } 
+    }
 
     return replyJson({ error: { message: errs.join(' | ') || 'Нет активных ключей' } }, 400);
   } catch (e) {
