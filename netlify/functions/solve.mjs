@@ -114,6 +114,37 @@ export default async (req) => {
       }
     }
 
+    // Резерв на OpenRouter (если заданы OPENROUTER_KEY*)
+    const orModels = ['openrouter/free', 'google/gemma-3-27b-it:free'];
+    for (const key of orKeys) {
+      if (Date.now() - started > 8500) break;
+      const cid = `or:${key.slice(-8)}`;
+      if ((cooldown.get(cid) || 0) > now) continue;
+      for (const orModel of orModels) {
+        if (Date.now() - started > 8500) break;
+        try {
+          const r = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${key}` },
+            signal: AbortSignal.timeout(timeLeft()),
+            body: JSON.stringify({
+              model: orModel,
+              temperature: 0,
+              messages: msgs,
+            }),
+          });
+          const data = await r.json().catch(() => ({}));
+          const reply = data.choices?.[0]?.message?.content?.trim();
+          if (reply) return replyJson({ choices: [{ message: { content: reply } }] });
+          if (r.status === 429) cooldown.set(cid, Date.now() + 5 * 60 * 1000);
+          errs.push(`or/${orModel}[..${key.slice(-4)}]: ${data.error?.message || `HTTP ${r.status}`}`);
+        } catch (e) {
+          errs.push(`or/${orModel}[..${key.slice(-4)}]: ${e.message}`);
+        }
+      }
+    }
+
+    // Резерв на Mistral (если заданы MISTRAL_KEY*)
     for (const key of mistralKeys) {
       if (Date.now() - started > 8500) break;
       const cid = `mistral:${key.slice(-8)}`;
@@ -137,31 +168,6 @@ export default async (req) => {
         errs.push(`mistral[..${key.slice(-4)}]: ${data.message || data.error?.message || 'empty'}`);
       } catch (e) {
         errs.push(`mistral[..${key.slice(-4)}]: ${e.message}`);
-      }
-    }
-
-    for (const key of orKeys) {
-      if (Date.now() - started > 8500) break;
-      const cid = `or:${key.slice(-8)}`;
-      if ((cooldown.get(cid) || 0) > now) continue;
-      try {
-        const r = await fetch('https://openrouter.ai/api/v1/chat/completions', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${key}` },
-          signal: AbortSignal.timeout(timeLeft()),
-          body: JSON.stringify({
-            model: 'google/gemini-2.0-flash-exp:free',
-            temperature: 0,
-            messages: msgs,
-          }),
-        });
-        const data = await r.json().catch(() => ({}));
-        const reply = data.choices?.[0]?.message?.content?.trim();
-        if (reply) return replyJson({ choices: [{ message: { content: reply } }] });
-        if (r.status === 429) cooldown.set(cid, Date.now() + 5 * 60 * 1000);
-        errs.push(`or[..${key.slice(-4)}]: ${data.error?.message || 'empty'}`);
-      } catch (e) {
-        errs.push(`or[..${key.slice(-4)}]: ${e.message}`);
       }
     }
 
