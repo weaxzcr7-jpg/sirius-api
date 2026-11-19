@@ -12,24 +12,25 @@ export default async (req) => {
     const body = await req.json();
     const text =
       body.messages.map((m) => m.content).join('\n\n') +
-      '\n\nIMPORTANT: Pay strict attention to minus signs in exponents (e.g. ^(-15), ^(-20)). Solve step by step. Output ONLY raw valid JSON without markdown.';
-    const models = ['gemini-3.8-flash', 'gemini-3.1-flash-lite-preview'];
+      '\n\nIMPORTANT: Watch minus signs in exponents carefully (e.g. ^(-15) : ^(-20) = ^(5)). Solve step by step. Output ONLY raw valid JSON without markdown.';
+    const models = ['gemini-3.1-flash-lite-preview', 'gemini-3-flash-preview', 'gemini-2.5-flash'];
     const errs = [];
 
     for (const model of models) {
-      for (let attempt = 0; attempt < 2; attempt++) {
+      try {
         const r = await fetch(
           `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${GEMINI_KEY}`,
           {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
+            signal: AbortSignal.timeout(4500),
             body: JSON.stringify({
               contents: [{ role: 'user', parts: [{ text }] }],
               generationConfig: {
                 temperature: 0,
-                maxOutputTokens: 2048,
+                maxOutputTokens: 1024,
                 responseMimeType: 'application/json',
-                thinkingConfig: { thinkingBudget: 256 },
+                thinkingConfig: { thinkingBudget: 128 },
               },
             }),
           }
@@ -48,8 +49,8 @@ export default async (req) => {
           );
         }
         errs.push(`${model}: ${data.error.message}`);
-        if (!/high demand|overloaded|503/i.test(data.error.message)) break;
-        await new Promise((res) => setTimeout(res, 1000));
+      } catch (err) {
+        errs.push(`${model}: ${err.message}`);
       }
     }
 
