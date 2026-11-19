@@ -174,5 +174,5 @@ export default async (req) => {
     return replyJson({ error: { message: errs.join(' | ') || 'Нет активных ключей' } }, 400);
   } catch (e) {
     return replyJson({ error: { message: e.message } }, 400);
-  }
+  } 
 };
