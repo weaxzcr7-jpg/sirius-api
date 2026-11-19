@@ -53,17 +53,16 @@ export default async (req) => {
       'gemini-2.5-flash-lite',
       'gemini-2.5-flash',
       'gemini-3-flash-preview',
-      'gemini-3.1-flash-lite-preview',
     ];
 
     const now = Date.now();
     for (const model of models) {
-      if (Date.now() - started > 8000) break;
+      if (Date.now() - started > 7800) break;
       const mid = `model:${model}`;
       if ((cooldown.get(mid) || 0) > now) continue;
 
       for (const key of geminiKeys) {
-        if (Date.now() - started > 8000) break;
+        if (Date.now() - started > 7800) break;
         const kid = `key:${key.slice(-8)}`;
         const cid = `${model}:${key.slice(-8)}`;
         if ((cooldown.get(kid) || 0) > now || (cooldown.get(cid) || 0) > now) continue;
@@ -74,7 +73,7 @@ export default async (req) => {
             {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
-              signal: AbortSignal.timeout(Math.min(3500, timeLeft())),
+              signal: AbortSignal.timeout(Math.min(3200, timeLeft())),
               body: JSON.stringify({
                 contents: [{ role: 'user', parts: [{ text: prompt }] }],
                 generationConfig: {
@@ -174,5 +173,5 @@ export default async (req) => {
     return replyJson({ error: { message: errs.join(' | ') || 'Нет активных ключей' } }, 400);
   } catch (e) {
     return replyJson({ error: { message: e.message } }, 400);
-  } 
+  }
 };
