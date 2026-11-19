@@ -162,4 +162,4 @@ export default async (req) => {
   } catch (e) {
     return replyJson({ error: { message: e.message } }, 400);
   }
-};
+}; 
