@@ -12,11 +12,15 @@ export default async (req) => {
     const body = await req.json();
     const text =
       body.messages.map((m) => m.content).join('\n\n') +
-      '\n\nIMPORTANT: Watch minus signs in exponents carefully (e.g. ^(-15) : ^(-20) = ^(5)). Solve step by step. Output ONLY raw valid JSON without markdown.';
-    const models = ['gemini-3.1-flash-lite-preview', 'gemini-3-flash-preview', 'gemini-2.5-flash'];
+      '\n\nIMPORTANT: Watch minus signs in exponents carefully. First write brief math steps in "steps", then final values in "answers". Output ONLY raw valid JSON without markdown.';
+
+    const configs = [
+      { model: 'gemini-3.1-flash-lite-preview', budget: 0 },
+      { model: 'gemini-3-flash-preview', budget: 128 },
+    ];
     const errs = [];
 
-    for (const model of models) {
+    for (const { model, budget } of configs) {
       try {
         const r = await fetch(
           `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${GEMINI_KEY}`,
@@ -28,9 +32,9 @@ export default async (req) => {
               contents: [{ role: 'user', parts: [{ text }] }],
               generationConfig: {
                 temperature: 0,
-                maxOutputTokens: 1024,
+                maxOutputTokens: 1536,
                 responseMimeType: 'application/json',
-                thinkingConfig: { thinkingBudget: 0 },
+                thinkingConfig: { thinkingBudget: budget },
               },
             }),
           }
