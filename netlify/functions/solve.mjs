@@ -48,84 +48,21 @@ export default async (req) => {
     const errs = [];
     const started = Date.now();
     const timeLeft = () => Math.max(1500, 9200 - (Date.now() - started));
-
-    const models = [
-      'gemini-2.5-flash-lite',
-      'gemini-2.5-flash',
-      'gemini-3-flash-preview',
-    ];
-
     const now = Date.now();
-    for (const model of models) {
-      if (Date.now() - started > 7800) break;
-      const mid = `model:${model}`;
-      if ((cooldown.get(mid) || 0) > now) continue;
 
-      for (const key of geminiKeys) {
-        if (Date.now() - started > 7800) break;
-        const kid = `key:${key.slice(-8)}`;
-        const cid = `${model}:${key.slice(-8)}`;
-        if ((cooldown.get(kid) || 0) > now || (cooldown.get(cid) || 0) > now) continue;
-
-        try {
-          const r = await fetch(
-            `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${key}`,
-            {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              signal: AbortSignal.timeout(Math.min(3200, timeLeft())),
-              body: JSON.stringify({
-                contents: [{ role: 'user', parts: [{ text: prompt }] }],
-                generationConfig: {
-                  temperature: 0,
-                  maxOutputTokens: 1536,
-                  responseMimeType: 'application/json',
-                  thinkingConfig: { thinkingBudget: 0 },
-                },
-              }),
-            }
-          );
-          const data = await r.json().catch(() => ({}));
-          if (!data.error) {
-            const parts = data.candidates?.[0]?.content?.parts || [];
-            const reply = parts.filter((p) => !p.thought).map((p) => p.text).join('').trim();
-            if (reply) return replyJson({ choices: [{ message: { content: reply } }] });
-          }
-          const msg = data.error?.message || `HTTP ${r.status}`;
-          if (r.status === 429 || /quota|limit|exceeded/i.test(msg)) {
-            cooldown.set(cid, Date.now() + 10 * 60 * 1000);
-          } else if (r.status === 404 || /not found/i.test(msg)) {
-            cooldown.set(mid, Date.now() + 30 * 60 * 1000);
-            errs.push(`${model}[..${key.slice(-4)}]: ${msg.slice(0, 90)}`);
-            break;
-          } else if (r.status === 503 || /high demand|overloaded|unavailable/i.test(msg)) {
-            cooldown.set(mid, Date.now() + 2 * 60 * 1000);
-            errs.push(`${model}[..${key.slice(-4)}]: ${msg.slice(0, 90)}`);
-            break;
-          } else if (r.status === 401 || r.status === 403 || /permission denied|not valid/i.test(msg)) {
-            cooldown.set(kid, Date.now() + 30 * 60 * 1000);
-          }
-          errs.push(`${model}[..${key.slice(-4)}]: ${msg.slice(0, 90)}`);
-        } catch (e) {
-          errs.push(`${model}[..${key.slice(-4)}]: ${e.message}`);
-          break;
-        }
-      }
-    }
-
-    // Резерв на OpenRouter (если заданы OPENROUTER_KEY*)
+    // 1. Основной провайдер: OpenRouter
     const orModels = ['openrouter/free', 'google/gemma-3-27b-it:free'];
     for (const key of orKeys) {
-      if (Date.now() - started > 8500) break;
+      if (Date.now() - started > 8200) break;
       const cid = `or:${key.slice(-8)}`;
       if ((cooldown.get(cid) || 0) > now) continue;
       for (const orModel of orModels) {
-        if (Date.now() - started > 8500) break;
+        if (Date.now() - started > 8200) break;
         try {
           const r = await fetch('https://openrouter.ai/api/v1/chat/completions', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${key}` },
-            signal: AbortSignal.timeout(timeLeft()),
+            signal: AbortSignal.timeout(Math.min(4500, timeLeft())),
             body: JSON.stringify({
               model: orModel,
               temperature: 0,
@@ -143,7 +80,7 @@ export default async (req) => {
       }
     }
 
-    // Резерв на Mistral (если заданы MISTRAL_KEY*)
+    // 2. Запасной провайдер: Mistral (если заданы MISTRAL_KEY*)
     for (const key of mistralKeys) {
       if (Date.now() - started > 8500) break;
       const cid = `mistral:${key.slice(-8)}`;
@@ -167,6 +104,65 @@ export default async (req) => {
         errs.push(`mistral[..${key.slice(-4)}]: ${data.message || data.error?.message || 'empty'}`);
       } catch (e) {
         errs.push(`mistral[..${key.slice(-4)}]: ${e.message}`);
+      }
+    }
+
+    // 3. Запасной провайдер: Gemini
+    const models = ['gemini-3-flash-preview', 'gemini-2.5-flash', 'gemini-2.5-flash-lite'];
+    for (const model of models) {
+      if (Date.now() - started > 8800) break;
+      const mid = `model:${model}`;
+      if ((cooldown.get(mid) || 0) > now) continue;
+
+      for (const key of geminiKeys) {
+        if (Date.now() - started > 8800) break;
+        const kid = `key:${key.slice(-8)}`;
+        const cid = `${model}:${key.slice(-8)}`;
+        if ((cooldown.get(kid) || 0) > now || (cooldown.get(cid) || 0) > now) continue;
+
+        try {
+          const r = await fetch(
+            `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${key}`,
+            {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              signal: AbortSignal.timeout(Math.min(3000, timeLeft())),
+              body: JSON.stringify({
+                contents: [{ role: 'user', parts: [{ text: prompt }] }],
+                generationConfig: {
+                  temperature: 0,
+                  maxOutputTokens: 1536,
+                  responseMimeType: 'application/json',
+                  thinkingConfig: { thinkingBudget: 0 },
+                },
+              }),
+            }
+          );
+          const data = await r.json().catch(() => ({}));
+          if (!data.error) {
+            const parts = data.candidates?.[0]?.content?.parts || [];
+            const reply = parts.filter((p) => !p.thought).map((p) => p.text).join('').trim();
+            if (reply) return replyJson({ choices: [{ message: { content: reply } }] });
+          }
+          const msg = data.error?.message || `HTTP ${r.status}`;
+          if (r.status === 429 || /quota|limit|exceeded/i.test(msg)) {
+            cooldown.set(cid, Date.now() + 10 * 60 * 1000);
+          } else if (r.status === 404 || /no longer available|not found/i.test(msg)) {
+            cooldown.set(mid, Date.now() + 60 * 60 * 1000);
+            errs.push(`${model}[..${key.slice(-4)}]: ${msg.slice(0, 90)}`);
+            break;
+          } else if (r.status === 503 || /high demand|overloaded|unavailable/i.test(msg)) {
+            cooldown.set(mid, Date.now() + 2 * 60 * 1000);
+            errs.push(`${model}[..${key.slice(-4)}]: ${msg.slice(0, 90)}`);
+            break;
+          } else if (r.status === 401 || r.status === 403 || /permission denied|not valid/i.test(msg)) {
+            cooldown.set(kid, Date.now() + 30 * 60 * 1000);
+          }
+          errs.push(`${model}[..${key.slice(-4)}]: ${msg.slice(0, 90)}`);
+        } catch (e) {
+          errs.push(`${model}[..${key.slice(-4)}]: ${e.message}`);
+          break;
+        }
       }
     }
 
